@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+typer
+rich
+sqlalchemy
+asyncpg
+neo4j
+qdrant-client
+httpx
+python-dotenv
+pytest
+pytest-asyncio
+greenlet
