@@ -51,6 +51,33 @@ class OllamaClient:
             print(f"Ollama chat error: {e}")
             raise
 
+    async def chat_stream(self, messages: list[dict], options: dict = None):
+        """
+        Stream chat responses from Ollama.
+        """
+        url = "/api/chat"
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True
+        }
+        if options:
+            payload["options"] = options
+
+        try:
+            async with self.client.stream("POST", url, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line:
+                        try:
+                            data = json.loads(line)
+                            yield data
+                        except json.JSONDecodeError:
+                            continue
+        except httpx.HTTPError as e:
+            print(f"Ollama chat stream error: {e}")
+            raise
+
     async def close(self):
         await self.client.aclose()
 

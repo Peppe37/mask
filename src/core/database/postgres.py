@@ -25,3 +25,9 @@ async def check_postgres_connection():
     except Exception as e:
         print(f"Postgres connection failed: {e}")
         return False
+
+def get_postgres_engine():
+    """Return the SQLAlchemy engine for PostgreSQL (sync version for SQLModel)"""
+    from sqlalchemy import create_engine
+    sync_url = f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+    return create_engine(sync_url, echo=False)

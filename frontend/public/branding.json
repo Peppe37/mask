@@ -1,0 +1,39 @@
+{
+    "branding": {
+        "appName": "Mask Agent",
+        "logo": "/logo.png",
+        "logoSvg": "/logo.svg",
+        "favicon": "/favicon.png"
+    },
+    "themes": {
+        "dark": {
+            "name": "Dark Theme",
+            "primary": "#7c3aed",
+            "primaryHover": "#8b5cf6",
+            "background": "#0a0a0f",
+            "surface": "#141419",
+            "surfaceHover": "#1c1c24",
+            "border": "#27272a",
+            "text": "#fafafa",
+            "textSecondary": "#a1a1aa",
+            "success": "#10b981",
+            "warning": "#f59e0b",
+            "error": "#ef4444"
+        },
+        "light": {
+            "name": "Light Theme",
+            "primary": "#7c3aed",
+            "primaryHover": "#6d28d9",
+            "background": "#ffffff",
+            "surface": "#f9fafb",
+            "surfaceHover": "#f3f4f6",
+            "border": "#e5e7eb",
+            "text": "#111827",
+            "textSecondary": "#6b7280",
+            "success": "#10b981",
+            "warning": "#f59e0b",
+            "error": "#ef4444"
+        }
+    },
+    "defaultTheme": "dark"
+}
