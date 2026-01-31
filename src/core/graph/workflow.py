@@ -6,6 +6,10 @@ from src.core.graph.state import AgentState
 from src.core.agents.search_agent import get_search_agent
 from src.core.agents.scraper_agent import get_scraper_agent
 from src.core.llm.ollama_client import get_llm
+from src.core.memory.manager import memory_manager
+from src.core.memory.graph_memory import graph_memory
+from src.core.tool_registry import tool_registry
+import json
 
 
 class MaskWorkflow:
@@ -14,17 +18,70 @@ class MaskWorkflow:
     def __init__(self):
         self.graph = None
     
+    def __init__(self):
+        self.graph = None
+    
+    async def retrieve_node(self, state: AgentState) -> AgentState:
+        """Retrieve relevant context from memory (RAG + Graph)."""
+        print("🧠 Retrieve: Fetching memory context...")
+        
+        user_query = state["user_query"]
+        session_id = state["session_id"]
+        
+        # Get project ID for context filtering
+        try:
+            session = memory_manager.get_session(session_id)
+            project_id = session.project_id if session else None
+        except:
+            project_id = None
+            
+        # 1. RAG Search (Vector DB)
+        rag_context = await memory_manager.search_relevant_history(user_query, project_id=project_id)
+        
+        # 2. Graph Search (Neo4j)
+        graph_context = await graph_memory.retrieve_context(user_query)
+        
+        # Combine
+        full_context = ""
+        if rag_context:
+            full_context += f"{rag_context}\n\n"
+        if graph_context:
+            full_context += f"{graph_context}\n\n"
+            
+        state["memory_context"] = full_context.strip()
+        if full_context:
+            print("✅ Retrieve: Found relevant memory")
+        else:
+            print("   Retrieve: No relevant memory found")
+            
+        return state
+
     async def router_node(self, state: AgentState) -> AgentState:
         """Determine if web search is needed."""
         print("🔀 Router: Analyzing query...")
         
-        search_agent = await get_search_agent()
         user_query = state["user_query"]
+        
+        # Check for direct URLs in the query
+        import re
+        # Regex to capture URLs
+        url_pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+[^\s]*'
+        direct_urls = re.findall(url_pattern, user_query)
+        
+        if direct_urls:
+            print(f"✅ Router: Direct URLs detected: {direct_urls}")
+            state["urls_to_scrape"] = direct_urls
+            state["needs_search"] = False
+            state["direct_scrape"] = True # New flag to indicate direct routing
+            return state
+
+        search_agent = await get_search_agent()
         
         # Check if search is needed
         needs_search = await search_agent.should_search(user_query, state.get("messages", []))
         
         state["needs_search"] = needs_search
+        state["direct_scrape"] = False
         
         if needs_search:
             print("✅ Router: Web search required")
@@ -75,7 +132,42 @@ class MaskWorkflow:
             return state
         
         # Scrape URLs
-        scraped = await scraper_agent.scrape_multiple(urls, max_urls=3)
+        scraped = []
+        # Deduplicate URLs while preserving order
+        unique_urls = []
+        seen = set()
+        for u in urls:
+            if u not in seen:
+                unique_urls.append(u)
+                seen.add(u)
+                
+        # Limit to 3 (or more if direct scrape? maybe strict 3 for perf)
+        # If direct scrape, maybe just scrape the ones provided.
+        # Let's keep max 3 for now.
+        for i, url in enumerate(unique_urls[:3]):
+            try:
+                # Heuristic: Crawl the first result if it looks like a documentation site
+                # or if the user specifically asked for depth (which we assume for now)
+                
+                is_docs = any(kw in url.lower() for kw in ["docs", "documentation", "wiki", "manual", "guide", "github.io"])
+                
+                # If direct scrape of a doc site, ALWAYS crawl
+                should_crawl = (i == 0 and is_docs) or state.get("direct_scrape")
+                
+                if should_crawl and is_docs: 
+                    print(f"🕷️  Crawling {url} (Depth: 2)...")
+                    crawl_results = await scraper_agent.crawl(url, max_depth=2, max_pages=8)
+                    scraped.extend(crawl_results)
+                else:
+                    # Standard scraping for others
+                    print(f"🕷️  Scraping {url}...")
+                    result = await scraper_agent.scrape_url(url)
+                    if not result.error:
+                        scraped.append(result)
+                        
+            except Exception as e:
+                print(f"   Error processing {url}: {e}")
+
         state["scraped_content"] = scraped
         
         # Extract relevant content
@@ -85,13 +177,12 @@ class MaskWorkflow:
         
         for content in scraped:
             if content.error:
-                print(f"   Error scraping {content.url}: {content.error}")
                 continue
             
             # Extract relevant parts
             relevant = await scraper_agent.extract_relevant_content(content, user_query)
             if relevant and "no relevant" not in relevant.lower():
-                relevant_parts.append(f"From {content.title}:\n{relevant}")
+                relevant_parts.append(f"From {content.title} ({content.url}):\n{relevant}")
                 sources.append({"title": content.title, "url": content.url})
         
         # Combine into web context
@@ -127,7 +218,9 @@ IMPORTANT:
 - Use the information from the sources above to answer accurately
 - Be accurate and cite when using specific facts
 - If sources don't fully answer the question, say so
+- If sources don't fully answer the question, say so
 - DO NOT hallucinate or use internal knowledge that contradicts the sources
+- DO NOT use tools (like 'get_weather') unless they are specifically relevant to the request. A URL is NOT a location.
 """
         elif state.get("search_performed"):
             system_prompt += """
@@ -137,19 +230,51 @@ IMPORTANT:
 - Explicitly tell the user that no relevant information was found on the web.
 - Be honest about the lack of information rather than providing a generic or off-topic answer.
 """
+        # Fallback for direct scrape failure
+        elif state.get("direct_scrape") and not web_context:
+             system_prompt += """
+IMPORTANT: 
+- You attempted to access the specific URL provided by the user but extracted no content.
+- This might be due to the site blocking scrapers or being inaccessible.
+- Apologize and state that you could not read the content of the provided URL.
+- DO NOT hallucinate the content.
+"""
+
+        # Add Memory Context
+        memory_context = state.get("memory_context", "")
+        if memory_context:
+            system_prompt += f"\n\n{memory_context}\n"
+            
+        # Add Tools
+        tools = tool_registry.list_tools()
+        if tools:
+            tools_json = json.dumps(tools, indent=2)
+            system_prompt += f"""
+\n\nAVAILABLE TOOLS:
+You have access to the following tools. If you need to use one, output a JSON block like:
+```json
+{{
+    "tool": "tool_name",
+    "arguments": {{ "arg1": "value" }}
+}}
+```
+
+Tools Definition:
+{tools_json}
+"""
+
+        # Add instructions to avoid tool hallucination
+        system_prompt += """
+IMPORTANT TOOL USAGE RULES:
+- Only use a tool if it matches the user's intent perfectly.
+- "get_weather" requires a CITY name and is for weather ONLY. It cannot be used for URLs.
+- If unsure, do not use any tool.
+"""
         
-        # Generate response
         # Generate response
         messages = [{"role": "system", "content": system_prompt}]
         
-        # Add conversation history (excluding the last user message which is separate in user_query? 
-        # Actually state["messages"] includes the full history + current user message if we appended it in coordinator.
-        # Let's check enhanced_coordinator.py: history.append({"role": "user", "content": user_input})
-        # So state["messages"] has EVERYTHING.
-        # But wait, we shouldn't duplicate the system prompt if it's already in history?
-        # The history passed from enhanced_coordinator might have a system prompt for Project Context.
-        # Let's just append the history messages after our new system prompt.
-        
+        # Add conversation history
         input_messages = state.get("messages", [])
         
         # Sanitize messages for Ollama (ensure explicit list of dicts)
@@ -162,8 +287,6 @@ IMPORTANT:
                 elif msg.type == "system": role = "system"
                 messages.append({"role": role, "content": msg.content})
             elif isinstance(msg, dict):
-                 # Filter out system messages if we already added ours?
-                 # Let's keep them but ensure format
                  messages.append({
                      "role": msg.get("role", "user"),
                      "content": msg.get("content", "")
@@ -172,25 +295,17 @@ IMPORTANT:
                 # Fallback
                 messages.append({"role": "user", "content": str(msg)})
 
-        print(f"DEBUG: Messages sent to LLM: {len(messages)}")
+        print(f"DEBUG: Messages prepared for LLM: {len(messages)}")
         
-        response_msg = await llm.chat(messages)
-        response = response_msg.get("content", "")
-        
-        # Add source citations if available
-        if sources:
-            citations = "\n\n**Sources:**\n" + "\n".join([
-                f"- [{s['title']}]({s['url']})" for s in sources
-            ])
-            response += citations
-        
-        state["final_response"] = response
-        print("✅ CoordinatorAgent: Response generated")
+        # Prepare for streaming - do NOT run chat here
+        state["final_messages"] = messages
         
         return state
     
-    def should_search(self, state: AgentState) -> Literal["search", "coordinator"]:
+    def should_search(self, state: AgentState) -> Literal["search", "scrape", "coordinator"]:
         """Route to search or directly to coordinator."""
+        if state.get("direct_scrape", False):
+            return "scrape"
         return "search" if state.get("needs_search", False) else "coordinator"
     
     def build_graph(self) -> StateGraph:
@@ -200,13 +315,17 @@ IMPORTANT:
         workflow = StateGraph(AgentState)
         
         # Add nodes
+        workflow.add_node("retrieve", self.retrieve_node)
         workflow.add_node("router", self.router_node)
         workflow.add_node("search", self.search_node)
         workflow.add_node("scrape", self.scrape_node)
         workflow.add_node("coordinator", self.coordinator_node)
         
         # Set entry point
-        workflow.set_entry_point("router")
+        workflow.set_entry_point("retrieve")
+        
+        # Edge from retrieve to router
+        workflow.add_edge("retrieve", "router")
         
         # Add conditional edges from router
         workflow.add_conditional_edges(
@@ -214,6 +333,7 @@ IMPORTANT:
             self.should_search,
             {
                 "search": "search",
+                "scrape": "scrape",
                 "coordinator": "coordinator"
             }
         )

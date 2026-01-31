@@ -27,6 +27,7 @@ class TestCoordinatorAgent:
             mock_memory.get_session = Mock(return_value=None)
             mock_memory.get_messages = Mock(return_value=[])
             mock_memory.add_message = Mock()
+            mock_memory.add_message_async = AsyncMock()
 
             with patch('src.core.agents.coordinator.get_llm', new_callable=AsyncMock) as mock_get_llm:
                 mock_llm = AsyncMock()
@@ -56,6 +57,7 @@ class TestCoordinatorAgent:
             mock_memory.get_session = Mock(return_value=None)
             mock_memory.get_messages = Mock(return_value=[])
             mock_memory.add_message = Mock()
+            mock_memory.add_message_async = AsyncMock()
 
             with patch('src.core.agents.coordinator.get_llm', new_callable=AsyncMock) as mock_get_llm:
                 mock_llm = AsyncMock()
@@ -101,6 +103,7 @@ class TestCoordinatorAgent:
             mock_memory.get_project = Mock(return_value=mock_project)
             mock_memory.get_messages = Mock(return_value=[])
             mock_memory.add_message = Mock()
+            mock_memory.add_message_async = AsyncMock()
 
             with patch('src.core.agents.coordinator.get_llm', new_callable=AsyncMock) as mock_get_llm:
                 mock_llm = AsyncMock()
@@ -139,6 +142,7 @@ class TestCoordinatorAgent:
             mock_memory.get_messages = Mock(return_value=mock_messages)
             mock_memory.update_messages = Mock()
             mock_memory.add_message = Mock()
+            mock_memory.add_message_async = AsyncMock()
 
             with patch('src.core.agents.coordinator.summarizer') as mock_summarizer:
                 mock_summarizer.summarize = AsyncMock(return_value="Summary of long conversation")
@@ -170,6 +174,7 @@ class TestCoordinatorAgent:
             mock_memory.get_session = Mock(return_value=None)
             mock_memory.get_messages = Mock(return_value=[])
             mock_memory.add_message = Mock()
+            mock_memory.add_message_async = AsyncMock()
 
             with patch('src.core.agents.coordinator.get_llm', new_callable=AsyncMock) as mock_get_llm:
                 mock_llm = AsyncMock()
@@ -207,6 +212,7 @@ class TestCoordinatorAgent:
             mock_memory.get_session = Mock(return_value=None)
             mock_memory.get_messages = Mock(return_value=[])
             mock_memory.add_message = Mock()
+            mock_memory.add_message_async = AsyncMock()
 
             with patch('src.core.agents.coordinator.get_llm', new_callable=AsyncMock) as mock_get_llm:
                 mock_llm = AsyncMock()
@@ -261,6 +267,7 @@ class TestEnhancedCoordinator:
                 mock_memory.get_session = Mock(return_value=None)
                 mock_memory.get_messages = Mock(return_value=[])
                 mock_memory.add_message = Mock()
+                mock_memory.add_message_async = AsyncMock()
 
                 chunks = []
                 async for chunk in coordinator.run_stream("session-123", "Test query"):
@@ -285,12 +292,13 @@ class TestEnhancedCoordinator:
                 mock_memory.get_session = Mock(return_value=None)
                 mock_memory.get_messages = Mock(return_value=[])
                 mock_memory.add_message = Mock()
+                mock_memory.add_message_async = AsyncMock()
 
                 async for _ in coordinator.run_stream("session-123", "Test"):
                     pass
 
                 # Verify response was saved
-                mock_memory.add_message.assert_called_with("session-123", "assistant", "The answer is 42")
+                mock_memory.add_message_async.assert_called_with("session-123", "assistant", "The answer is 42")
 
     @pytest.mark.asyncio
     async def test_run_stream_with_user_profile(self):
@@ -308,6 +316,7 @@ class TestEnhancedCoordinator:
                 mock_memory.get_session = Mock(return_value=None)
                 mock_memory.get_messages = Mock(return_value=[])
                 mock_memory.add_message = Mock()
+                mock_memory.add_message_async = AsyncMock()
 
                 with patch('src.core.agents.enhanced_coordinator.user_profile_manager') as mock_profile:
                     mock_profile.get_profile = Mock(return_value="User: John, Developer")

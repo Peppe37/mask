@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "ministral-3:8b"
+    OLLAMA_EMBEDDING_MODEL: str = "embeddinggemma:300m"
     MAX_HISTORY_TOKENS: int = 4000
 
     model_config = SettingsConfigDict(

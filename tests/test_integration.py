@@ -96,7 +96,8 @@ class TestEndToEndWorkflow:
                     assert state["web_context"] is not None
 
                     state = await workflow.coordinator_node(state)
-                    assert state["final_response"] is not None
+                    # assert state["final_response"] is not None (Old check)
+                    assert state["final_messages"] is not None
 
     @pytest.mark.asyncio
     async def test_project_context_flow(self):

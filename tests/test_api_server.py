@@ -268,13 +268,14 @@ class TestChatEndpoint:
 
     @pytest.mark.asyncio
     async def test_chat_endpoint(self):
-        """Test chat streaming endpoint."""
+        """Test chat streaming endpoint with SSE."""
         from httpx import AsyncClient
 
         with patch('src.api.server.enhanced_coordinator') as mock_coordinator:
             async def mock_stream(*args, **kwargs):
-                yield "Hello "
-                yield "world!"
+                yield {"type": "status", "content": "Thinking..."}
+                yield {"type": "token", "content": "Hello"}
+                yield {"type": "token", "content": " world!"}
 
             mock_coordinator.run_stream = mock_stream
 
@@ -285,7 +286,13 @@ class TestChatEndpoint:
                     json={"message": "Hi", "session_id": "test-session"}
                 )
                 assert response.status_code == 200
-                assert "Hello world!" in response.text
+                assert "text/event-stream" in response.headers["content-type"]
+                
+                content = response.text
+                assert 'data: {"type": "status", "content": "Thinking..."}\n\n' in content
+                assert 'data: {"type": "token", "content": "Hello"}\n\n' in content
+                assert 'data: {"type": "token", "content": " world!"}\n\n' in content
+                assert 'data: [DONE]\n\n' in content
 
 
 class TestRequestModels:

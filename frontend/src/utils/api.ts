@@ -120,11 +120,12 @@ export const api = {
         return response.json();
     },
 
-    async sendMessageStream(sessionId: string, message: string, onChunk: (chunk: string) => void): Promise<void> {
+    async sendMessageStream(sessionId: string, message: string, onEvent: (type: 'status' | 'token', content: string) => void): Promise<void> {
         const response = await fetch(`${API_BASE_URL}/chat`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'text/event-stream'
             },
             body: JSON.stringify({ message, session_id: sessionId }),
         });
@@ -135,12 +136,31 @@ export const api = {
 
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
+        let buffer = '';
 
         while (true) {
             const { done, value } = await reader!.read();
             if (done) break;
+
             const chunk = decoder.decode(value, { stream: true });
-            onChunk(chunk);
+            buffer += chunk;
+
+            const lines = buffer.split('\n\n');
+            buffer = lines.pop() || ''; // Keep the incomplete line in buffer
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') return;
+
+                    try {
+                        const event = JSON.parse(data);
+                        onEvent(event.type, event.content);
+                    } catch (e) {
+                        console.error('Error parsing SSE event:', e);
+                    }
+                }
+            }
         }
     }
 };

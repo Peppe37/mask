@@ -127,7 +127,8 @@ class TestMaskWorkflow:
         ]
 
         mock_agent = AsyncMock()
-        mock_agent.scrape_multiple.return_value = mock_scraped
+        # Workflow now iterates and calls scrape_url individually
+        mock_agent.scrape_url.side_effect = mock_scraped
         mock_agent.extract_relevant_content.return_value = "Relevant content"
 
         with patch('src.core.graph.workflow.get_scraper_agent', new_callable=AsyncMock) as mock_get_agent:
@@ -176,7 +177,8 @@ class TestMaskWorkflow:
         ]
 
         mock_agent = AsyncMock()
-        mock_agent.scrape_multiple.return_value = mock_scraped
+        # Workflow now iterates and calls scrape_url individually
+        mock_agent.scrape_url.side_effect = mock_scraped
         mock_agent.extract_relevant_content.return_value = "Relevant content"
 
         with patch('src.core.graph.workflow.get_scraper_agent', new_callable=AsyncMock) as mock_get_agent:
@@ -184,7 +186,7 @@ class TestMaskWorkflow:
 
             result = await workflow.scrape_node(state)
 
-            # Should only extract from the successful scrape
+            assert len(result["scraped_content"]) == 1 # Only one successful scrape
             assert mock_agent.extract_relevant_content.call_count == 1
 
     @pytest.mark.asyncio
@@ -207,9 +209,11 @@ class TestMaskWorkflow:
             mock_get_llm.return_value = mock_llm
             result = await workflow.coordinator_node(state)
 
-            assert "Generated response" in result["final_response"]
-            assert "Source 1" in result["final_response"]
-            assert "https://example.com" in result["final_response"]
+            # Check that messages were prepared (streaming mode)
+            assert "final_messages" in result
+            system_msg = result["final_messages"][0]["content"]
+            assert "Web context from sources" in system_msg
+             # Sources are not in system prompt, so we don't check for them here
 
     @pytest.mark.asyncio
     async def test_coordinator_node_search_found_nothing(self):
@@ -233,15 +237,14 @@ class TestMaskWorkflow:
             result = await workflow.coordinator_node(state)
 
             # Verify the response
-            assert "couldn't find" in result["final_response"]
+            # Verify system prompt content
+            assert "final_messages" in result
+            system_msg = result["final_messages"][0]["content"]
+            assert "needs_search" not in system_msg # "search_performed" flag logic handles prompt text
             
-            # Verify system prompt content (debugging inspection of call args if needed, 
-            # but here we just check that the LLM was called)
-            mock_llm.chat.assert_called_once()
-            messages = mock_llm.chat.call_args[0][0]
-            system_msg = next(m for m in messages if m["role"] == "system")
-            assert "searched the web" in system_msg["content"]
-            assert "found no relevant" in system_msg["content"]
+            # Actually the logic adds "searched the web... found no relevant" to system prompt
+            assert "searched the web" in system_msg
+            assert "found no relevant" in system_msg
 
     @pytest.mark.asyncio
     async def test_coordinator_node_without_web_context(self):
@@ -261,7 +264,10 @@ class TestMaskWorkflow:
             mock_get_llm.return_value = mock_llm
             result = await workflow.coordinator_node(state)
 
-            assert result["final_response"] == "Direct response"
+            # In streaming mode, we don't generate response here, we just pass messages
+            assert "final_messages" in result
+            # Optional: check message count or content
+            assert len(result["final_messages"]) >= 1
 
     @pytest.mark.asyncio
     async def test_coordinator_node_sanitizes_messages(self):
@@ -289,11 +295,10 @@ class TestMaskWorkflow:
 
         with patch('src.core.graph.workflow.get_llm', new_callable=AsyncMock) as mock_get_llm:
             mock_get_llm.return_value = mock_llm
-            await workflow.coordinator_node(state)
-
+            result = await workflow.coordinator_node(state)
+            
             # Verify messages were sanitized and sent
-            call_args = mock_llm.chat.call_args
-            messages = call_args[0][0]
+            messages = result["final_messages"]
 
             # Should have system prompt + sanitized messages
             assert len(messages) > 1
@@ -335,7 +340,7 @@ class TestMaskWorkflow:
             assert result is not None
             assert workflow.graph is not None
             mock_graph_class.assert_called_once_with(AgentState)
-            assert mock_graph.add_node.call_count == 4  # router, search, scrape, coordinator
+            assert mock_graph.add_node.call_count == 5  # retrieve, router, search, scrape, coordinator
             mock_graph.compile.assert_called_once()
 
     @pytest.mark.asyncio

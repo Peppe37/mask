@@ -78,6 +78,25 @@ class OllamaClient:
             print(f"Ollama chat stream error: {e}")
             raise
 
+            raise
+
+    async def embeddings(self, prompt: str, model: str = None) -> list[float]:
+        """Generate embeddings for a given text."""
+        url = "/api/embeddings"
+        payload = {
+            "model": model or self.model,
+            "prompt": prompt
+        }
+        
+        try:
+            response = await self.client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("embedding", [])
+        except httpx.HTTPError as e:
+            print(f"Ollama embeddings error: {e}")
+            raise
+
     async def close(self):
         await self.client.aclose()
 

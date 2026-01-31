@@ -3,6 +3,7 @@
 from typing import AsyncGenerator, List
 from src.core.graph.workflow import get_workflow
 from src.core.memory.manager import memory_manager
+from src.core.llm.ollama_client import get_llm
 from src.core.agents.summarizer import summarizer
 from src.core.config import settings
 from src.core.memory.user_profile import user_profile_manager
@@ -67,7 +68,7 @@ class EnhancedCoordinator:
             print(f"[EnhancedCoordinator] Failed to process user profile: {e}")
 
         # 3. Add user message to memory
-        memory_manager.add_message(session_id, "user", user_input)
+        await memory_manager.add_message_async(session_id, "user", user_input)
         # Note: History already has the user input if we appended it? No, history comes from DB which doesn't have it yet.
         # Check line 36-50. History is built from DB.
         # So we need to append current user input to history for the workflow.
@@ -86,35 +87,46 @@ class EnhancedCoordinator:
                     # Yield status updates
                     if node_name == "router":
                         if node_state.get("needs_search"):
-                            yield "[🔍 Searching the web...]\n"
+                            yield {"type": "status", "content": "🔍 Searching the web..."}
 
                     elif node_name == "search":
                         results_count = len(node_state.get("search_results", []))
-                        yield f"[📊 Found {results_count} sources]\n"
+                        yield {"type": "status", "content": f"📊 Found {results_count} sources"}
 
                     elif node_name == "scrape":
                         scraped = node_state.get("scraped_content", [])
                         success_count = sum(1 for s in scraped if not s.error)
-                        yield f"[📄 Reading {success_count} articles...]\n"
+                        yield {"type": "status", "content": f"📄 Reading {success_count} articles..."}
 
                     elif node_name == "coordinator":
-                        # Stream the final response
-                        response = node_state.get("final_response", "")
-                        if response:
-                            yield response
+                        # Detect if we have prepared messages for streaming
+                        final_messages = node_state.get("final_messages")
+                        if final_messages:
+                            print("[EnhancedCoordinator] Starting LLM stream...")
+                            llm = await get_llm()
+                            async for chunk in llm.chat_stream(final_messages):
+                                content = chunk.get("message", {}).get("content", "")
+                                if content:
+                                    yield {"type": "token", "content": content}
+                                    final_response_accumulator += content
+                                    
+                        # Fallback for non-streaming (if ever used)
+                        elif node_state.get("final_response"):
+                            response = node_state.get("final_response", "")
+                            yield {"type": "token", "content": response}
                             final_response_accumulator = response
         except Exception as e:
             import traceback
             print(f"[EnhancedCoordinator] Error in workflow stream: {e}")
             traceback.print_exc()
-            yield f"\n[Error] Something went wrong: {str(e)}"
+            yield {"type": "token", "content": f"\n[Error] Something went wrong: {str(e)}"}
 
         # 5. Save assistant message to memory
 
         # 5. Save assistant message to memory
         # Use the accumulated response from the stream instead of re-running
         if final_response_accumulator:
-            memory_manager.add_message(session_id, "assistant", final_response_accumulator)
+            await memory_manager.add_message_async(session_id, "assistant", final_response_accumulator)
         else:
              print("[EnhancedCoordinator] Warning: No response generated to persist.")
 

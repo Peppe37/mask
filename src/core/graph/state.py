@@ -24,11 +24,14 @@ class AgentState(TypedDict):
     # Scraping flow
     urls_to_scrape: NotRequired[List[str]]  # URLs to scrape
     scraped_content: NotRequired[List[ScrapedContent]]  # Scraped content
+    direct_scrape: NotRequired[bool]  # Whether to scrape directly (skip search)
     
     # Context enrichment
     web_context: NotRequired[str]  # Enriched context from web
+    memory_context: NotRequired[str]  # Enriched context from RAG and Graph
     sources: NotRequired[List[dict]]  # Sources for citation
     
     # Output
     final_response: NotRequired[str]  # Final answer
+    final_messages: NotRequired[List[dict]]  # Messages prepared for LLM generation
     response_chunks: NotRequired[List[str]]  # Streaming chunks

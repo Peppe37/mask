@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { MessageBubble } from './MessageBubble';
 import { InputArea } from './InputArea';
 import { TypingIndicator } from './TypingIndicator';
+import { ThinkingStatus } from './ThinkingStatus';
 import { api, type ChatSession, type Project } from '../utils/api';
 import { applyTheme, loadBranding, getCurrentTheme } from '../utils/theme';
 import { ContextMenu, type MenuItem } from './ContextMenu';
@@ -19,6 +20,7 @@ export const ChatInterface: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [currentTheme, setCurrentTheme] = useState(getCurrentTheme());
+    const [thinkingStatus, setThinkingStatus] = useState<string | null>(null);
 
     const [projects, setProjects] = useState<Project[]>([]);
     const [currentProject, setCurrentProject] = useState<Project | null>(null);
@@ -140,21 +142,28 @@ export const ChatInterface: React.FC = () => {
             // NOTE: We do NOT add an empty assistant message immediately.
             // We wait for the stream to start or use the Loading indicator.
 
-            await api.sendMessageStream(sessionId, content, (chunk) => {
-                setMessages(prev => {
-                    const newMessages = [...prev];
-                    const lastMsg = newMessages[newMessages.length - 1];
+            await api.sendMessageStream(sessionId, content, (type, content) => {
+                if (type === 'status') {
+                    setThinkingStatus(content);
+                } else if (type === 'token') {
+                    // Clear thinking status once we get tokens (or keep it if mixed? usually clear or change to "Generating...")
+                    setThinkingStatus(null);
 
-                    if (lastMsg && lastMsg.role === 'assistant') {
-                        // Append to existing assistant message
-                        lastMsg.content = aiResponse + chunk;
-                    } else {
-                        // First chunk! Add the assistant message
-                        newMessages.push({ role: 'assistant', content: chunk });
-                    }
-                    return newMessages;
-                });
-                aiResponse += chunk;
+                    setMessages(prev => {
+                        const newMessages = [...prev];
+                        const lastMsg = newMessages[newMessages.length - 1];
+
+                        if (lastMsg && lastMsg.role === 'assistant') {
+                            // Append to existing assistant message
+                            lastMsg.content = aiResponse + content;
+                        } else {
+                            // First chunk! Add the assistant message
+                            newMessages.push({ role: 'assistant', content: content });
+                        }
+                        return newMessages;
+                    });
+                    aiResponse += content;
+                }
             });
 
             // Auto-naming separate process
@@ -432,7 +441,10 @@ export const ChatInterface: React.FC = () => {
                         ))
                     )}
                     {isLoading && messages[messages.length - 1]?.role === 'user' && (
-                        <TypingIndicator />
+                        <>
+                            <ThinkingStatus status={thinkingStatus} />
+                            {!thinkingStatus && <TypingIndicator />}
+                        </>
                     )}
                     <div ref={messagesEndRef} />
                 </div>

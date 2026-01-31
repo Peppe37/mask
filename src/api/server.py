@@ -121,12 +121,18 @@ async def get_session_messages(session_id: str):
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
-    """Stream chat responses with web search capabilities."""
+    """Stream chat responses with web search capabilities using Server-Sent Events (SSE)."""
     async def generate():
-        async for chunk in enhanced_coordinator.run_stream(request.session_id, request.message):
-            yield chunk
+        import json
+        async for event in enhanced_coordinator.run_stream(request.session_id, request.message):
+            # Event is a dictionary: {"type": "status"|"token", "content": ...}
+            # SSE format: data: <json>\n\n
+            yield f"data: {json.dumps(event)}\n\n"
+        
+        # Signal end of stream
+        yield "data: [DONE]\n\n"
     
-    return StreamingResponse(generate(), media_type="text/plain")
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 @app.get("/health")
 async def health_check():
